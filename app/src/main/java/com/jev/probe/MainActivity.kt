@@ -1,6 +1,7 @@
 package com.jev.probe
 
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -36,6 +37,8 @@ class MainActivity : AppCompatActivity() {
     private val red = Color.parseColor("#DC2626")
     private val ink = Color.parseColor("#111827")
     private val sub = Color.parseColor("#6B7280")
+    private var directOcrGranted = false
+    private val projectionRequest = 741
 
     private fun dp(v: Int) = TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).roundToInt()
@@ -70,16 +73,19 @@ class MainActivity : AppCompatActivity() {
         val a11y = isA11yEnabled()
         val overlay = Settings.canDrawOverlays(this)
         val key = prefs.hasKey()   // judge route key: the one analysis cannot run without
-        val ready = a11y && overlay && key
+        val ready = (a11y || directOcrGranted) && overlay && key
 
         // Readiness card
-        container.addView(statusCard(ready, a11y, overlay, key))
+        container.addView(statusCard(ready, a11y, directOcrGranted, overlay, key))
         container.addView(privacyHint())
 
         // Permission checklist
         container.addView(sectionLabel("权限设置"))
         container.addView(permCard("无障碍权限", "读取当前聊天窗口的消息文字", a11y) {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        })
+        container.addView(permCard("屏幕 OCR 权限", "不开无障碍也能直接截屏识别聊天文字", directOcrGranted) {
+            requestDirectOcr()
         })
         container.addView(permCard("悬浮窗权限", "在聊天窗口上方显示分析卡片", overlay) {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
@@ -105,9 +111,27 @@ class MainActivity : AppCompatActivity() {
         container.addView(toggle)
     }
 
+    private fun requestDirectOcr() {
+        val pm = getSystemService(MediaProjectionManager::class.java)
+        startActivityForResult(pm.createScreenCaptureIntent(), projectionRequest)
+    }
+
+    @Deprecated("Android activity result API retained for minSdk 30")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != projectionRequest || resultCode != RESULT_OK || data == null) return
+        directOcrGranted = true
+        val i = Intent(this, com.jev.probe.capture.DirectOcrService::class.java)
+            .putExtra(com.jev.probe.capture.DirectOcrService.EXTRA_RESULT, resultCode)
+            .putExtra(com.jev.probe.capture.DirectOcrService.EXTRA_DATA, data)
+        if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(i) else startService(i)
+        Toast.makeText(this, "已开启屏幕 OCR", Toast.LENGTH_SHORT).show()
+        build()
+    }
+
     // ---------------------------------------------------------------- cards
 
-    private fun statusCard(ready: Boolean, a11y: Boolean, overlay: Boolean, key: Boolean): View {
+    private fun statusCard(ready: Boolean, a11y: Boolean, directOcr: Boolean, overlay: Boolean, key: Boolean): View {
         val c = cardBox()
         val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         head.addView(dot(if (ready) green else red).apply {
@@ -116,6 +140,7 @@ class MainActivity : AppCompatActivity() {
         head.addView(text(if (ready) "已就绪，可以用了" else "尚未就绪", 16f, if (ready) green else ink, bold = true))
         c.addView(head)
         c.addView(checkLine("无障碍", a11y))
+        c.addView(checkLine("屏幕 OCR", directOcr, okWord = "已授权", noWord = "未授权（可替代无障碍）"))
         c.addView(checkLine("悬浮窗", overlay))
         c.addView(checkLine("密钥", key, okWord = "已设", noWord = "未设"))
         // History recording is opt-in (off by default). Mention it here, never block on it.

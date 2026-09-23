@@ -356,6 +356,17 @@ class OverlayController(private val ctx: Context) {
             hint(msg)))
     }
 
+    /** Render the latest local OCR result without requiring an accessibility tree. */
+    fun showOcrText(text: String) {
+        ensureRoot(); bubble?.alpha = 1f
+        setContent(listOf(
+            line("屏幕 OCR（本地）", "#111827", 14f, true),
+            hint("未区分发送方；截图不会保存或上传"),
+            line(text.take(1800), "#374151", 14f)
+        ))
+        if (!expanded) toggle()
+    }
+
     fun showJudgment(a: Analysis) {
         lastJudgment = a
         render(a, generating = true)
